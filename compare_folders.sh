@@ -12,6 +12,8 @@ SOURCE_FOLDERS=(
 
 DESTINATION_FOLDER="./destination"
 OUTPUT_LOG_PATH="compare_log.txt"
+MIN_DEPTH=1
+MAX_DEPTH=1
 
 # Rənglər
 RED='\033[0;31m'
@@ -62,12 +64,12 @@ gather_folder_sizes() {
 
   while IFS= read -r -d '' dir; do
     local rel_path
-    rel_path=$(basename "$dir")
+    rel_path="${dir#$root_abs/}"
     local size
     size=$(safe_du_size "$dir")
     echo "$rel_path $size"
     echo "  scanned: $rel_path -> $size bytes" >&2
-  done < <(find "$root" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+  done < <(find "$root_abs" -mindepth "$MIN_DEPTH" -maxdepth "$MAX_DEPTH" -type d -print0 2>/dev/null)
 }
 
 # Compare aggregated source sizes against destination sizes and produce log lines.
@@ -189,6 +191,33 @@ main() {
   echo -e "\n${BLUE}================================${NC}"
   echo -e "${BLUE}Folder Comparison Script${NC}"
   echo -e "${BLUE}================================${NC}\n"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --min-depth)
+        MIN_DEPTH="$2"
+        shift 2
+        ;;
+      --max-depth)
+        MAX_DEPTH="$2"
+        shift 2
+        ;;
+      --help|-h)
+        echo "Usage: $0 [--min-depth N] [--max-depth N]"
+        exit 0
+        ;;
+      *)
+        error_exit "Unknown argument: $1"
+        ;;
+    esac
+  done
+
+  if [[ -z "$MIN_DEPTH" || "$MIN_DEPTH" -lt 1 ]]; then
+    error_exit "--min-depth must be an integer >= 1"
+  fi
+  if [[ -z "$MAX_DEPTH" || "$MAX_DEPTH" -lt "$MIN_DEPTH" ]]; then
+    error_exit "--max-depth must be an integer >= --min-depth"
+  fi
 
   if [[ ${#SOURCE_FOLDERS[@]} -eq 0 ]]; then
     error_exit "No source folders configured."
