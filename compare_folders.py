@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import os
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,8 @@ SOURCE_FOLDERS = [
 ]
 DESTINATION_FOLDER = Path("./destination")
 OUTPUT_LOG_PATH = Path("compare_log.txt")
+DEFAULT_MIN_DEPTH = 1
+DEFAULT_MAX_DEPTH = 1
 
 
 def safe_file_size(path: Path) -> int:
@@ -24,7 +27,7 @@ def safe_file_size(path: Path) -> int:
         return 0
 
 
-def gather_folder_sizes(root: Path) -> Dict[str, int]:
+def gather_folder_sizes(root: Path, min_depth: int = DEFAULT_MIN_DEPTH, max_depth: int = DEFAULT_MAX_DEPTH) -> Dict[str, int]:
     """
     Verilmiş kök qovluğun altında bütün qovluqları gəzərək
     hər bir qovluğun ümumi ölçüsünü hesablayır.
@@ -56,14 +59,17 @@ def gather_folder_sizes(root: Path) -> Dict[str, int]:
             total_size += sizes.get(child_rel, 0)
 
         sizes[rel_path] = total_size
-        # Only print top-level folders (no / or \ in path)
-        if '/' not in rel_path and '\\' not in rel_path:
+        depth = len(rel_path.replace('\\', '/').split('/'))
+        if min_depth <= depth <= max_depth:
             print(f"  scanned: {rel_path} -> {total_size} bytes")
 
-    # Filter out nested folders
-    top_level_sizes = {path: size for path, size in sizes.items() if '/' not in path and '\\' not in path}
-    print(f"Found {len(top_level_sizes)} top-level folders under {root}\n")
-    return top_level_sizes
+    filtered_sizes = {
+        path: size
+        for path, size in sizes.items()
+        if min_depth <= len(path.replace('\\', '/').split('/')) <= max_depth
+    }
+    print(f"Found {len(filtered_sizes)} folders at depth {min_depth}-{max_depth} under {root}\n")
+    return filtered_sizes
 
 
 def compare_aggregated_sizes(
@@ -80,13 +86,11 @@ def compare_aggregated_sizes(
     entries: List[str] = []
     stats = {"TOTAL": 0, "OK": 0, "FAIL": 0, "MISSING": 0}
 
-    # Bütün relative pathləri bir sırada toplayırıq (nested folderləri kənara qoyaraq)
+    # Bütün relative pathləri bir sırada toplayırıq
     all_rel_paths = set()
     for sizes in source_sizes:
         all_rel_paths.update(sizes.keys())
     all_rel_paths.update(dest_sizes.keys())
-    # Filter to keep only top-level folders
-    all_rel_paths = {path for path in all_rel_paths if '/' not in path and '\\' not in path}
     all_rel_paths = sorted(all_rel_paths)
 
     print("Aggregating sizes from all source folders and comparing with destination...")
@@ -164,9 +168,26 @@ def write_log(output_path: Path, entries: List[str], stats: Dict[str, int], star
 
 
 def main() -> None:
-	source_folders = SOURCE_FOLDERS
-	destination_folder = DESTINATION_FOLDER
-	
+	parser = argparse.ArgumentParser(description="Compare folder sizes between source and destination directories.")
+	parser.add_argument("--source", "-s", action="append", nargs="+", default=[], help="One or more source folders to compare. Repeat as needed.")
+	parser.add_argument("--destination", "-d", default=str(DESTINATION_FOLDER), help="Destination folder to compare against.")
+	parser.add_argument("--min-depth", type=int, default=DEFAULT_MIN_DEPTH, help="Minimum folder depth to include, relative to each root folder.")
+	parser.add_argument("--max-depth", type=int, default=DEFAULT_MAX_DEPTH, help="Maximum folder depth to include, relative to each root folder.")
+	parser.add_argument("--output", "-o", default=str(OUTPUT_LOG_PATH), help="Path to the output log file.")
+	args = parser.parse_args()
+
+	if args.min_depth < 1:
+		raise SystemExit("--min-depth must be at least 1")
+	if args.max_depth < args.min_depth:
+		raise SystemExit("--max-depth must be greater than or equal to --min-depth")
+
+	source_folders = [Path(item) for group in args.source for item in group] if args.source else SOURCE_FOLDERS
+	destination_folder = Path(args.destination)
+	output_log_path = Path(args.output)
+
+	if len(source_folders) == 0:
+		raise SystemExit("At least one source folder must be provided via --source.")
+
 	start_time = datetime.now()
 	print(f"Started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
 
@@ -182,11 +203,11 @@ def main() -> None:
 	# Bütün source folderlərdən ölçüləri yığırıq
 	source_sizes_list = []
 	for folder in source_folders:
-		sizes = gather_folder_sizes(folder)
+		sizes = gather_folder_sizes(folder, args.min_depth, args.max_depth)
 		source_sizes_list.append(sizes)
 
 	# Destination folder ölçülərini yığırıq
-	dest_sizes = gather_folder_sizes(destination_folder)
+	dest_sizes = gather_folder_sizes(destination_folder, args.min_depth, args.max_depth)
 
 	# Müqayisə aparırıq
 	entries, stats = compare_aggregated_sizes(
