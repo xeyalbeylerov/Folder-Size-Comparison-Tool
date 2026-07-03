@@ -108,8 +108,10 @@ def compare_aggregated_sizes(
         
         # Source paths siyahısı
         source_paths_list = []
+        source_present = False
         for i, source_folder in enumerate(source_folders):
             if rel_path in source_sizes[i]:
+                source_present = True
                 source_paths_list.append(f"{source_folder.name}: {source_sizes[i][rel_path]} bytes")
             else:
                 source_paths_list.append(f"{source_folder.name}: <missing>")
@@ -119,6 +121,9 @@ def compare_aggregated_sizes(
             stats["MISSING"] += 1
             dest_size = 0
             dest_path_str = "<missing>"
+        elif not source_present:
+            result = "MISSING_IN_SOURCE"
+            stats["MISSING"] += 1
         else:
             result = "OK" if aggregated_size == dest_size else "FAIL"
             stats[result] += 1
